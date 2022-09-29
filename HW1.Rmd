@@ -1,0 +1,75 @@
+---
+title: "**STAT-433 HW1**"
+author: "Xiaoyang Wang"
+date: "2022-09-26"
+output:
+  html_document:
+    number_sections: yes
+geometry: "left=2cm,right=2cm,top=2cm,bottom=2cm"
+---
+
+The GitHub link is: https://github.com/WXYS1209/STAT433
+
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+library(nycflights13)
+library(ggplot2)
+```
+
+# How many flights have a missing dep_time? What other variables are missing? What might these rows represent?
+
+```{r}
+mdt = flights %>% filter(is.na(dep_time)) %>% summarise(nn=n())
+```
+
+`r mdt` flights have a missing dep_time.
+
+```{r}
+flights %>% filter(is.na(dep_time)) %>% is.na() %>% apply(2, sum)
+```
+
+It is clearly that **dep_delay**, **arr_time**, **arr_delay**, **tailnum**, **air_time** are missing. These rows may represent canceled flights.
+
+# Currently dep_time and sched_dep_time are convenient to look at, but hard to compute with because they’re not really continuous numbers. Convert them to a more convenient representation of number of minutes since midnight.
+
+After converting, some values of the two new variables(**new_dep_time** and **new_sched_dep_time**) are as follows:
+
+```{r}
+flights %>% 
+  mutate(new_dep_time = dep_time %% 100 + dep_time %/% 100 * 60,
+         new_sched_dep_time = sched_dep_time %% 100 + sched_dep_time %/% 100 * 60) %>% 
+  summarise(new_dep_time, new_sched_dep_time) %>% head()
+```
+
+# Look at the number of canceled flights per day. Is there a pattern? Is the proportion of canceled flights related to the average delay? Use multiple dyplr operations, all on one line, concluding with ggplot(aes(x= ,y=)) + geom_point()
+
+We define **is.na(dep_delay)** as canceled filghts.
+
+```{r Problem 3}
+library(patchwork)
+
+p1 = flights %>%
+  mutate(date = lubridate::make_datetime(year, month, day)) %>%
+  group_by(date) %>%
+  summarise(canceled = sum(is.na(dep_delay))) %>% 
+  ggplot(aes(x = date, y = canceled)) + 
+  geom_line() + 
+  xlab("Date") + 
+  ylab('Canceled Flights')
+
+p2 = flights %>%
+  mutate(date = lubridate::make_datetime(year, month, day)) %>%
+  group_by(date) %>%
+  summarise(canceled = sum(is.na(dep_delay)), 
+            n = n(),
+            mean_dep_delay = mean(dep_delay, na.rm = TRUE)) %>%
+  ggplot(aes(x = canceled / n, y = mean_dep_delay)) + 
+  geom_point() + 
+  xlab("Proportion of Canceled Flights") + 
+  ylab('Average Delay (minutes)')
+
+p1+p2
+```
+
+From the left plot, we can see that there might not exist any pattern between the number of canceled flights and date. From the right plot, we can see that there is no obvious relationship between those two variables. However, as the proportion of canceled flights increases, the proportion of longer average delay increases generally.
+
