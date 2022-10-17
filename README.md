@@ -1,7 +1,7 @@
-**STAT-433 HW2**
+**STAT-433 HW3**
 ================
 Xiaoyang Wang
-2022-10-10
+2022-10-17
 
 ``` r
 library(dplyr)
@@ -10,166 +10,117 @@ library(ggplot2)
 library(tidyr)
 ```
 
-# Introduction
-
-In order to avoid delays as much as possible, one should fly during 4-8
-in general. Considering seasons, one should fly during 4-8 in Spring,
-4-9 in Summer, 4-10 and 12-14 in Fall and 4-10 in Winter. In terms of
-departure airports, one should fly during 4-8 at EWR, 5-11 at LGA, and 5
-or 7 at JFK.
-
-# 1 Overall
-
-We measure delays by arrival delays as they are what most people truly
-care about. The plot of departure hour against average delays is as
-follows:
+# 1 Compute the average delay by destination, then join on the airports data frame so you can show the spatial distribution of delays.
 
 ``` r
-new_flights = flights %>%
-  drop_na() %>% 
-  mutate(dep_hour = ifelse(dep_time %/% 100 > 0, dep_time %/% 100, 24)) %>% 
-  group_by(dep_hour)
+flights %>%
+  group_by(dest) %>% 
+  summarise(avg_delay = mean(arr_delay, na.rm = T)) %>% 
+  inner_join(airports, by = c(dest = "faa")) %>% 
+  ggplot(aes(lon, lat)) +
+  borders("state") +
+  geom_point(aes(col = avg_delay)) +
+  coord_quickmap() + 
+  xlab("Longitude") +
+  ylab("Latitude")
+```
 
-delay = new_flights %>% 
-  summarise(mean_delay = mean(arr_delay, na.rm=TRUE),
-            med_delay = median(arr_delay, na.rm=TRUE),
-            sd_delay = sd(arr_delay, na.rm=TRUE))
-delay %>% 
+![](README_3_files/figure-gfm/Map-1.png)<!-- -->
+
+# 2 Add the location of the origin and destination (i.e. the lat and lon) to flights.
+
+``` r
+airports_loc = airports %>% select(faa, lat, lon)
+
+flights %>% 
+  left_join(airports_loc,
+            by = c(origin = "faa")) %>% 
+  left_join(airports_loc,
+            by = c(dest = "faa"),
+            suffix = c(".origin", ".destination")) %>% 
+  select(origin, dest, lat.origin:lon.destination)
+```
+
+    ## # A tibble: 336,776 × 6
+    ##    origin dest  lat.origin lon.origin lat.destination lon.destination
+    ##    <chr>  <chr>      <dbl>      <dbl>           <dbl>           <dbl>
+    ##  1 EWR    IAH         40.7      -74.2            30.0           -95.3
+    ##  2 LGA    IAH         40.8      -73.9            30.0           -95.3
+    ##  3 JFK    MIA         40.6      -73.8            25.8           -80.3
+    ##  4 JFK    BQN         40.6      -73.8            NA              NA  
+    ##  5 LGA    ATL         40.8      -73.9            33.6           -84.4
+    ##  6 EWR    ORD         40.7      -74.2            42.0           -87.9
+    ##  7 EWR    FLL         40.7      -74.2            26.1           -80.2
+    ##  8 LGA    IAD         40.8      -73.9            38.9           -77.5
+    ##  9 JFK    MCO         40.6      -73.8            28.4           -81.3
+    ## 10 LGA    ORD         40.8      -73.9            42.0           -87.9
+    ## # … with 336,766 more rows
+
+# 3 Is there a relationship between the age of a plane and its delays?
+
+Still, we take arrival delays as the measurement of delays.
+
+``` r
+planes_year = planes %>% select(tailnum, year)
+
+flights %>% 
+  inner_join(planes_year,
+             by = c(tailnum = "tailnum"),
+             suffix = c("", ".plane")) %>% 
+  mutate(age = year - year.plane) %>% 
+  drop_na() %>% 
+  group_by(age) %>% 
+  summarise(mean_delay = mean(arr_delay, na.rm = T),
+            med_delay = median(arr_delay, na.rm = T),
+            sd_delay = sd(arr_delay, na.rm = T)) %>% 
   gather(stat, value, mean_delay:sd_delay) %>% 
-  ggplot(aes(x = factor(dep_hour), y = value, fill = stat)) + 
+  ggplot(aes(x = age, y = value, fill = stat)) +
   geom_bar(stat = "identity", position = 'dodge') + 
   ylab('Delay Statistics') +
-  xlab('Departure Hour') 
+  scale_x_continuous("Plane Age", breaks = seq(0, 57,
+                                               by = 10))
 ```
 
-![](README_2_files/figure-gfm/overall-1.png)<!-- -->
+![](README_3_files/figure-gfm/Delay_Stat-1.png)<!-- -->
 
-From the plot, we can see that *from 4 to 10* the **mean delays** are
-negative; *from 4 to 19*, the **median delays** are negative; *from 4 to
-8*, the **standard deviation delays** are relatively small.
-Consequently, 4-8 may be the ideal time for one to fly if one wants to
-avoid delays as much as possible.
+From the plot we can see that:
 
-# 2 Season
+-   The mean delays generally increase as the age of planes increase for
+    the planes whose ages are less than 10 years;
 
-According to Google, I set March to May as Spring, June to August as
-Summer, September to November as Fall and the rest as Winter.
+-   For planes age 10-15 years, the mean delays decrease as the age
+    increase;
+
+-   Situation for planes age 15-25 is the same as that of planes age
+    0-15;
+
+-   For planes age 25 - 30, the mean delays increase as age increase;
+
+-   For the rest planes, mean delays generally decrease as the age of
+    planes increase.
+
+The standard variance and median delays seem meaningless here.
+
+Moreover, let’s look at the delay rate:
 
 ``` r
-new_flights_2 = new_flights %>% 
-  mutate(season = ifelse(month == 12, 1, month %/% 3 + 1)) %>% 
-  group_by(dep_hour)
-
-season = c("winter", "spring", "summer", "fall")
-for (i in 1:4){
-  assign(paste0("delay_", season[i]),
-         new_flights_2 %>% 
-           filter(season == i) %>% 
-           summarise(mean_delay = mean(arr_delay, na.rm=TRUE),
-                     med_delay = median(arr_delay, na.rm=TRUE),
-                     sd_delay = sd(arr_delay, na.rm=TRUE)) %>% 
-           gather(stat, value, mean_delay:sd_delay) %>% 
-           ggplot(aes(x = factor(dep_hour), y = value, fill = stat)) + 
-           geom_bar(stat = "identity", position = 'dodge') + 
-           ggtitle(season[i]) + 
-           xlab("") + 
-           ylab("") + 
-           theme(axis.text.x=element_text(size=5))
-           )
-}
-
-library(patchwork)
-
-delay_spring + delay_summer + delay_fall + delay_winter +
-  plot_layout(guides = "collect") &
-  theme(legend.position='bottom')
+flights %>% 
+  inner_join(planes_year,
+             by = c(tailnum = "tailnum"),
+             suffix = c("", ".plane")) %>% 
+  mutate(age = year - year.plane) %>% 
+  drop_na() %>% 
+  group_by(age) %>% 
+  summarise(rate_delay = sum(arr_delay > 0) / n()) %>% 
+  ggplot(aes(x = age, y = rate_delay)) +
+  geom_point() + 
+  ylab('Delay Rate') +
+  scale_x_continuous("Plane Age", breaks = seq(0, 57,
+                                               by = 10))
 ```
 
-![](README_2_files/figure-gfm/season-1.png)<!-- -->
+![](README_3_files/figure-gfm/Delay_Rate-1.png)<!-- -->
 
-From the above plot, we can see that for **Spring**, the ideal time is
-still 4-8; for **Summer**, the ideal time may be 4-9; for **Fall**, the
-ideal time change to 4-10 and 12-14; for **Winter**, the ideal time turn
-out to be 4-10.
-
-# 3 Airport
-
-Here I only consider the departure airports.
-
-``` r
-airport = unique(flights$origin)
-for (i in 1:3){
-  assign(paste0("delay_", airport[i]),
-         new_flights_2 %>% 
-           filter(origin == airport[i]) %>% 
-           summarise(mean_delay = mean(arr_delay, na.rm=TRUE),
-                     med_delay = median(arr_delay, na.rm=TRUE),
-                     sd_delay = sd(arr_delay, na.rm=TRUE)) %>% 
-           gather(stat, value, mean_delay:sd_delay) %>% 
-           ggplot(aes(x = factor(dep_hour), y = value, fill = stat)) + 
-           geom_bar(stat = "identity", position = 'dodge') + 
-           ggtitle(airport[i]) + 
-           xlab("") + 
-           ylab("") + 
-           theme(axis.text.x=element_text(size=5))
-           )
-}
-
-library(patchwork)
-
-delay_EWR + delay_LGA + delay_JFK +
-  plot_layout(guides = "collect") &
-  theme(legend.position='bottom')
-```
-
-![](README_2_files/figure-gfm/airport-1.png)<!-- -->
-
-From the plot, it is clearly that for **EWR**, the ideal time is still
-4-8; for **LGA**, it changes to 5-11; and for **JFK**, only 5 and 7 is
-satisfying.
-
-# 4 Airline
-
-``` r
-delay_mean = new_flights_2 %>% 
-  group_by(dep_hour, carrier) %>% 
-  summarise(mean_delay = mean(arr_delay, na.rm=TRUE)) %>% 
-  ggplot(aes(x = factor(dep_hour), y = mean_delay, col = factor(carrier))) + 
-  geom_point() +
-  ggtitle("Mean") + 
-  xlab("") + 
-  ylab("") + 
-  theme(axis.text.x=element_text(size=5))
-
-delay_med = new_flights_2 %>% 
-  group_by(dep_hour, carrier) %>% 
-  summarise(med_delay = median(arr_delay, na.rm=TRUE)) %>% 
-  ggplot(aes(x = factor(dep_hour), y = med_delay, col = factor(carrier))) + 
-  geom_point() +
-  ggtitle("Median") + 
-  xlab("") + 
-  ylab("") + 
-  theme(axis.text.x=element_text(size=5))
-
-delay_sd = new_flights_2 %>% 
-  group_by(dep_hour, carrier) %>% 
-  summarise(sd_delay = sd(arr_delay, na.rm=TRUE)) %>% 
-  ggplot(aes(x = factor(dep_hour), y = sd_delay, col = factor(carrier))) + 
-  geom_point() +
-  ggtitle("Standard Deviation") + 
-  xlab("") + 
-  ylab("") + 
-  theme(axis.text.x=element_text(size=5))
-
-
-library(patchwork)
-
-delay_mean + delay_med + delay_sd +
-  plot_layout(guides = "collect") &
-  theme(legend.position='bottom')
-```
-
-![](README_2_files/figure-gfm/airline-1.png)<!-- -->
-
-As there are so many airlines, it is hard to tell. But obviously, the
-choice varies between different airlines.
+From the plot, we can see that the delay rate has approximate situation
+with the mean delays for the planes age less than 30 years. For the rest
+planes, there is no obvious pattern between the delay rate and the age.
